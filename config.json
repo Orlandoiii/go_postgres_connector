@@ -21,6 +21,7 @@
         "Password": "lTf7$12vgeBQnrOyhtctJFdwgVX",
         "SlotName": "cdc_slot",
         "WorkerBufferSize": 320,
+        "GoFinalLSN": false,
         "Listeners": [
             {
                 "Publication": "pub_transaction",
