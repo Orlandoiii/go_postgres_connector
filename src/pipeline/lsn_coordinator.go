@@ -24,14 +24,12 @@ func NewLSNCoordinator(logger observability.Logger) *LSNCoordinator {
 	}
 }
 
-// HasRegisteredTables verifica si hay tablas registradas en el LSNCoordinator
 func (lc *LSNCoordinator) HasRegisteredTables() bool {
 	lc.mu.RLock()
 	defer lc.mu.RUnlock()
 	return len(lc.targetLSNs) > 0
 }
 
-// RegisterTable registra una nueva tabla en el LSNCoordinator
 func (lc *LSNCoordinator) RegisterTable(workerKey string) {
 	lc.mu.Lock()
 	defer lc.mu.Unlock()
@@ -43,7 +41,6 @@ func (lc *LSNCoordinator) RegisterTable(workerKey string) {
 	lc.targetLSNs[workerKey] = pglogrepl.LSN(0)
 }
 
-// ReportLSN registra el LSN de una tabla
 func (lc *LSNCoordinator) ReportLSN(workerKey string, lsn pglogrepl.LSN) {
 	lc.mu.Lock()
 	defer lc.mu.Unlock()
@@ -56,7 +53,6 @@ func (lc *LSNCoordinator) ReportLSN(workerKey string, lsn pglogrepl.LSN) {
 	}
 }
 
-// GetGlobalLSN obtiene el LSN global minimo de las tablas registradas
 func (lc *LSNCoordinator) GetGlobalLSN() pglogrepl.LSN {
 	lc.mu.RLock()
 	defer lc.mu.RUnlock()
