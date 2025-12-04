@@ -204,3 +204,26 @@ func (d *Dispatcher) Stop(ctx context.Context) {
 		}
 	}
 }
+
+func (d *Dispatcher) GetTotalPendingEvents() int {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	total := 0
+	for _, worker := range d.workers {
+		total += worker.PendingEvents()
+	}
+	return total
+}
+
+func (d *Dispatcher) HasPendingEvents() bool {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	for _, worker := range d.workers {
+		if worker.HasPendingEvents() {
+			return true
+		}
+	}
+	return false
+}

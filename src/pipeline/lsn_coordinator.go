@@ -61,18 +61,25 @@ func (lc *LSNCoordinator) GetGlobalLSN() pglogrepl.LSN {
 	lc.mu.RLock()
 	defer lc.mu.RUnlock()
 
-	minLsn := pglogrepl.LSN(0)
-
 	if len(lc.targetLSNs) == 0 {
-		return minLsn
+		return pglogrepl.LSN(0)
 	}
 
+	minLsn := pglogrepl.LSN(0)
+	hasNonZero := false
+
 	for _, lsn := range lc.targetLSNs {
-		if lsn < minLsn {
-			minLsn = lsn
+
+		if lsn > 0 {
+
+			if !hasNonZero || lsn < minLsn {
+
+				minLsn = lsn
+
+				hasNonZero = true
+			}
 		}
 	}
 
 	return minLsn
-
 }

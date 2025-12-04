@@ -25,6 +25,7 @@ type Connector struct {
 	replicator  *postgres.Replicator
 	postgresCfg *config.PostgresConfig
 	sinkFactory pipeline.SinkFactory
+	goFinalLSN  bool
 }
 
 func NewConnector(ctx context.Context) (*Connector, error) {
@@ -81,6 +82,7 @@ func NewConnector(ctx context.Context) (*Connector, error) {
 		coordinator: coordinator,
 		postgresCfg: postgresCfg,
 		sinkFactory: sinkFactory,
+		goFinalLSN:  postgresCfg.GoFinalLSN,
 	}, nil
 }
 
@@ -129,7 +131,7 @@ func (c *Connector) Start(ctx context.Context) error {
 				c.dispatcher,
 				c.coordinator,
 				c.logger,
-				c.postgresCfg.GoFinalLSN,
+				c.goFinalLSN,
 			)
 			if err != nil {
 				c.logger.Error(ctx, "Error creando replicator", err)

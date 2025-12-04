@@ -27,6 +27,7 @@ type Replicator struct {
 	currentLSN   pglogrepl.LSN
 	lastSendTime time.Time
 	logger       observability.Logger
+	goFinalLSN   bool
 }
 
 func NewReplicator(sqlConn *pgx.Conn, replConn *pgconn.PgConn,
@@ -35,6 +36,7 @@ func NewReplicator(sqlConn *pgx.Conn, replConn *pgconn.PgConn,
 	dispatcher *pipeline.Dispatcher,
 	coordinator *pipeline.LSNCoordinator,
 	logger observability.Logger,
+	goFinalLSN bool,
 ) (*Replicator, error) {
 	return &Replicator{
 		decoder:      NewDecoder(logger),
@@ -46,6 +48,7 @@ func NewReplicator(sqlConn *pgx.Conn, replConn *pgconn.PgConn,
 		listeners:    listeners,
 		slot:         slot,
 		lastSendTime: time.Time{},
+		goFinalLSN:   goFinalLSN,
 	}, nil
 }
 
@@ -326,6 +329,12 @@ func (r *Replicator) Start(ctx context.Context) error {
 
 	}
 
+	lastLSN, err := GetSlotLSN(ctx, r.sqlConn, r.slot)
+
+	if err != nil && !r.goFinalLSN {
+		return fmt.Errorf("get slot LSN: %w", err)
+	}
+
 	err = r.sqlConn.Close(ctx)
 
 	if err != nil {
@@ -350,7 +359,13 @@ func (r *Replicator) Start(ctx context.Context) error {
 		fmt.Sprintf("publication_names '%s'", strings.Join(pubNames, ", ")),
 	}
 
-	err = pglogrepl.StartReplication(ctx, r.replConn, r.slot, sysident.XLogPos,
+	if r.goFinalLSN {
+		lastLSN = sysident.XLogPos
+	}
+
+	r.currentLSN = lastLSN
+
+	err = pglogrepl.StartReplication(ctx, r.replConn, r.slot, lastLSN,
 		pglogrepl.StartReplicationOptions{
 			PluginArgs: pluginArgs,
 			Mode:       pglogrepl.LogicalReplication,
@@ -363,8 +378,6 @@ func (r *Replicator) Start(ctx context.Context) error {
 	r.logger.Info(ctx, "Replicación iniciada",
 		"lsn", sysident.XLogPos.String(),
 		"tables", GetTableNames(r.listeners))
-
-	r.currentLSN = sysident.XLogPos
 
 	r.logger.Info(ctx, "Iniciando bucle de recepcion")
 
