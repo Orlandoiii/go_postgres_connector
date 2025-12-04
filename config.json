@@ -1,0 +1,94 @@
+{
+    "Log": {
+        "Enabled": true,
+        "Console": true,
+        "BeutifyConsoleLog": false,
+        "File": false,
+        "FilePath": "D:\\SYPAGO_DATA\\sycom_postgres_connector\\logs",
+        "MinLevel": "TRACE",
+        "RotationMaxSizeMB": 10,
+        "MaxAgeDay": 30,
+        "MaxBackups": 5,
+        "Compress": true,
+        "GlobalLogContext": {
+            "ServiceName": "sygateway",
+            "Version": "1.0.0"
+        }
+    },
+    "Postgres": {
+        "ConnectionString": "host=localhost port=6455 dbname=sypago_db sslmode=disable pool_min_conns=4 pool_max_conns=24 application_name=sycom_postgres_connector",
+        "User": "user_sypago",
+        "Password": "lTf7$12vgeBQnrOyhtctJFdwgVX",
+        "SlotName": "cdc_slot",
+        "WorkerBufferSize": 320,
+        "Listeners": [
+            {
+                "Publication": "pub_transaction",
+                "Table": "sygateway.transaction",
+                "Actions": [
+                    "insert",
+                    "update"
+                ]
+            },
+            {
+                "Publication": "pub_transaction_delivery_trace",
+                "Table": "sygateway.transaction_delivery_trace",
+                "Actions": [
+                    "insert",
+                    "update"
+                ]
+            },
+            {
+                "Publication": "pub_transaction_process_entries",
+                "Table": "sygateway.transaction_process_entries",
+                "Actions": [
+                    "insert",
+                    "update"
+                ],
+                "Pipeline": {
+                    "Targets": [
+                        {
+                            "Name": "transaction_process_entries_filtered",
+                            "Filter": {
+                                "Actions": [
+                                    "update"
+                                ],
+                                "Conditions": [
+                                    {
+                                        "Field": "new_data.status",
+                                        "Operator": "!=",
+                                        "Value": null
+                                    }
+                                ],
+                                "Logic": "AND"
+                            }
+                        },
+                        {
+                            "Name": "transaction_process_entries_all",
+                            "Filter": {
+                                "Actions": [
+                                    "insert",
+                                    "update"
+                                ]
+                            }
+                        }
+                    ]
+                }
+            },
+            {
+                "Publication": "pub_transaction_reception_trace",
+                "Table": "sygateway.transaction_reception_trace",
+                "Actions": [
+                    "insert",
+                    "update"
+                ]
+            }
+        ]
+    },
+    "Kafka": {
+        "BootstrapServers": [
+            "localhost:19092"
+        ],
+        "ClientID": "sycom_postgres_connector"
+    }
+}
