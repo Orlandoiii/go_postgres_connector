@@ -129,6 +129,7 @@ func (c *Connector) Start(ctx context.Context) error {
 				c.dispatcher,
 				c.coordinator,
 				c.logger,
+				c.postgresCfg.GoFinalLSN,
 			)
 			if err != nil {
 				c.logger.Error(ctx, "Error creando replicator", err)
