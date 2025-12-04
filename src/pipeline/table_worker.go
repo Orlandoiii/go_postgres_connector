@@ -108,3 +108,14 @@ func (tw *TableWorker) Process(ctx context.Context,
 
 	return nil
 }
+
+func (tw *TableWorker) PendingEvents() int {
+	if tw.eventCh == nil {
+		return 0
+	}
+	return len(tw.eventCh)
+}
+
+func (tw *TableWorker) HasPendingEvents() bool {
+	return tw.PendingEvents() > 0
+}
