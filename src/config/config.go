@@ -50,6 +50,7 @@ type postgresConfig struct {
 	Listeners        []Listener `json:"Listeners"`
 	SlotName         string     `json:"SlotName"`
 	WorkerBufferSize int        `json:"WorkerBufferSize"`
+	GoFinalLSN       bool       `json:"GoFinalLSN"`
 }
 
 type postgresConfigJSON struct {
@@ -59,6 +60,7 @@ type postgresConfigJSON struct {
 	Listeners        []Listener `json:"Listeners"`
 	SlotName         string     `json:"SlotName"`
 	WorkerBufferSize int        `json:"WorkerBufferSize"`
+	GoFinalLSN       bool       `json:"GoFinalLSN"`
 }
 
 func (c *postgresConfig) ConnectionString() string {
@@ -167,6 +169,7 @@ func PostgresCfg() (*PostgresConfig, error) {
 		Listeners:        postgresConfigJson.Listeners,
 		SlotName:         postgresConfigJson.SlotName,
 		WorkerBufferSize: postgresConfigJson.WorkerBufferSize,
+		GoFinalLSN:       postgresConfigJson.GoFinalLSN,
 	}
 
 	return &PostgresConfig{postgresConfig: postgresConfig, Listeners: postgresConfig.Listeners}, nil

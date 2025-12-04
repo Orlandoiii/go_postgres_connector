@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/jackc/pglogrepl"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -33,4 +34,24 @@ func CreateLogicalSlotIfMissing(ctx context.Context, sqlConn *pgx.Conn, slot, pl
 	_, err = sqlConn.Exec(ctx, CREATE_LOGICAL_SLOT_QUERY, slot, plugin)
 
 	return err
+}
+
+func GetSlotLSN(ctx context.Context, sqlConn *pgx.Conn, slotName string) (pglogrepl.LSN, error) {
+	var lsnStr *string
+	err := sqlConn.QueryRow(ctx, GET_SLOT_LSN_QUERY, slotName).Scan(&lsnStr)
+
+	if err != nil {
+		return pglogrepl.LSN(0), fmt.Errorf("get slot LSN: %w", err)
+	}
+
+	if lsnStr == nil || *lsnStr == "" {
+		return pglogrepl.LSN(0), nil
+	}
+
+	lsn, err := pglogrepl.ParseLSN(*lsnStr)
+	if err != nil {
+		return pglogrepl.LSN(0), fmt.Errorf("parse LSN: %w", err)
+	}
+
+	return lsn, nil
 }
