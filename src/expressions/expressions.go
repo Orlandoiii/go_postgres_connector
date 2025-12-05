@@ -18,17 +18,12 @@ func NewEvaluator(filterConfig config.FilterConfig, logger observability.Logger)
 	return &Evaluator{FilterConfig: filterConfig}
 }
 
-func (e *Evaluator) Evaluate(event *pipeline.ChangeEvent, txEvent *pipeline.TransactionEvent) (bool, error) {
+func (e *Evaluator) Evaluate(event *pipeline.ChangeEventSink) (bool, error) {
 
-	return e.evaluate(event, txEvent)
+	return e.evaluate(event)
 }
 
-func (e *Evaluator) evaluate(event *pipeline.ChangeEvent,
-	txEvent *pipeline.TransactionEvent) (bool, error) {
-
-	if len(e.FilterConfig.Conditions) == 0 {
-		return false, fmt.Errorf("no conditions provided")
-	}
+func (e *Evaluator) evaluate(event *pipeline.ChangeEventSink) (bool, error) {
 
 	logic := strings.ToUpper(e.FilterConfig.Logic)
 
@@ -40,7 +35,7 @@ func (e *Evaluator) evaluate(event *pipeline.ChangeEvent,
 
 	for _, condition := range e.FilterConfig.Conditions {
 
-		fieldValue, err := e.getFieldValue(condition.Field, event, txEvent)
+		fieldValue, err := e.getFieldValue(condition.Field, event)
 
 		if err != nil {
 			return false, err
@@ -59,7 +54,7 @@ func (e *Evaluator) evaluate(event *pipeline.ChangeEvent,
 }
 
 func (e *Evaluator) getFieldValue(fieldPath string,
-	event *pipeline.ChangeEvent, txEvent *pipeline.TransactionEvent) (interface{}, error) {
+	event *pipeline.ChangeEventSink) (interface{}, error) {
 
 	parts := strings.Split(fieldPath, ".")
 
@@ -83,22 +78,6 @@ func (e *Evaluator) getFieldValue(fieldPath string,
 			return nil, nil
 		}
 		return event.OldData[fieldName], nil
-
-	case "operation":
-		return string(event.Operation), nil
-
-	case "tx":
-		if txEvent == nil {
-			return nil, nil
-		}
-		switch fieldName {
-		case "xid":
-			return txEvent.Xid, nil
-		case "timestamp":
-			return txEvent.Timestamp, nil
-		default:
-			return nil, fmt.Errorf("unknown tx field: %s", fieldName)
-		}
 
 	default:
 		return nil, fmt.Errorf("unknown prefix: %s (supported: new_data, old_data, operation, tx)", prefix)

@@ -21,9 +21,8 @@ func NewExpressionFilter(config config.FilterConfig, logger observability.Logger
 	return &ExpressionFilter{Evaluator: evaluator, Logger: logger}
 }
 
-func (f *ExpressionFilter) ShouldProcess(ctx context.Context,
-	event *pipeline.ChangeEvent,
-	txEvent *pipeline.TransactionEvent) bool {
+func (f *ExpressionFilter) ShouldProcessSingleEvent(ctx context.Context,
+	event *pipeline.ChangeEventSink) bool {
 
 	if len(f.FilterConfig.Actions) == 0 {
 		return false
@@ -40,12 +39,12 @@ func (f *ExpressionFilter) ShouldProcess(ctx context.Context,
 		return true
 	}
 
-	result, err := f.Evaluator.Evaluate(event, txEvent)
+	result, err := f.Evaluator.Evaluate(event)
 
 	if err != nil {
 
 		f.Error(ctx, "Error evaluating expression", err,
-			"event", event, "txEvent", txEvent)
+			"event", event)
 
 		return false
 	}

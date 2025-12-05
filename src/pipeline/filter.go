@@ -7,7 +7,7 @@ import (
 )
 
 type EventFilter interface {
-	ShouldProcess(ctx context.Context, event *ChangeEvent, txEvent *TransactionEvent) bool
+	ShouldProcessSingleEvent(ctx context.Context, event *ChangeEventSink) bool
 }
 
 type EventFilterFactory interface {

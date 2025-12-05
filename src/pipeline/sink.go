@@ -4,9 +4,8 @@ import "context"
 
 // EventSink es la interfaz que debe implementar un sink para persistir los eventos de origen en el destino
 type EventSink interface {
-	PersistEvent(ctx context.Context,
-		changeEvent *ChangeEventSink,
-		txEvent *TransactionEvent) error
+	PersistSingleEvent(ctx context.Context,
+		changeEvent *ChangeEventSink) error
 
 	Close() error
 }

@@ -94,19 +94,19 @@ func (d *Dispatcher) getOrCreateWorker(ctx context.Context, workerKey string) *T
 
 }
 
-func (d *Dispatcher) process(ctx context.Context,
-	changeEvent *ChangeEvent,
-	txEvent *TransactionEvent,
+func (d *Dispatcher) processSingleEvent(ctx context.Context,
+	changeEventSink *ChangeEventSink,
 	pipeline *config.Pipeline,
 	workerKey string) error {
 
 	if pipeline == nil {
-		return d.persistEvent(ctx, workerKey, "", changeEvent, txEvent)
+		return d.persistEvent(ctx, workerKey, "", changeEventSink)
 	}
 
 	for _, target := range pipeline.Targets {
 
-		if !d.filter.CreateFilter(target.Filter).ShouldProcess(ctx, changeEvent, txEvent) {
+		if !d.filter.CreateFilter(target.Filter).
+			ShouldProcessSingleEvent(ctx, changeEventSink) {
 
 			d.logger.Info(ctx, "Event filtered", nil,
 				"worker", workerKey, "target", target.Name)
@@ -114,7 +114,7 @@ func (d *Dispatcher) process(ctx context.Context,
 			continue
 		}
 
-		err := d.persistEvent(ctx, workerKey, target.Name, changeEvent, txEvent)
+		err := d.persistEvent(ctx, workerKey, target.Name, changeEventSink)
 
 		if err != nil {
 
@@ -130,7 +130,7 @@ func (d *Dispatcher) process(ctx context.Context,
 }
 
 func (d *Dispatcher) persistEvent(ctx context.Context, tableKey string, targetName string,
-	changeEvent *ChangeEvent, txEvent *TransactionEvent) error {
+	changeEventSink *ChangeEventSink) error {
 
 	workerKey := fmt.Sprintf("%s.%s", tableKey, targetName)
 
@@ -144,7 +144,7 @@ func (d *Dispatcher) persistEvent(ctx context.Context, tableKey string, targetNa
 		return fmt.Errorf("worker not found")
 	}
 
-	return worker.Process(ctx, changeEvent, txEvent)
+	return worker.Process(ctx, changeEventSink)
 }
 
 func (d *Dispatcher) Dispatch(ctx context.Context, e *TransactionEvent) error {
@@ -171,7 +171,9 @@ func (d *Dispatcher) Dispatch(ctx context.Context, e *TransactionEvent) error {
 			continue
 		}
 
-		err := d.process(ctx, &changeEvent, e, listener.Pipeline, tableKey)
+		changeEventSink := changeEvent.ToChangeEventSink(e.Xid, e.LSN)
+
+		err := d.processSingleEvent(ctx, changeEventSink, listener.Pipeline, tableKey)
 
 		if err != nil {
 

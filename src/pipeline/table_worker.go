@@ -8,16 +8,11 @@ import (
 	"github.com/SOLUCIONESSYCOM/go_postgres_connector/src/observability"
 )
 
-type workerEvent struct {
-	changeEvent *ChangeEvent
-	txEvent     *TransactionEvent
-}
-
 type TableWorker struct {
 	tableKey       string
 	lsnCoordinator *LSNCoordinator
 	sink           EventSink
-	eventCh        chan *workerEvent
+	eventCh        chan *ChangeEventSink
 	wg             sync.WaitGroup
 	stopCh         chan struct{}
 	observability.Logger
@@ -32,37 +27,32 @@ func NewTableWorker(tableKey string, lsnCoordinator *LSNCoordinator,
 		tableKey:       tableKey,
 		lsnCoordinator: lsnCoordinator,
 		sink:           sink,
-		eventCh:        make(chan *workerEvent, bufferSize),
+		eventCh:        make(chan *ChangeEventSink, bufferSize),
 		wg:             sync.WaitGroup{},
 		stopCh:         make(chan struct{}),
 		Logger:         logger,
 	}
 }
 
-func (tw *TableWorker) processEvent(ctx context.Context, e *workerEvent) error {
+func (tw *TableWorker) processEvent(ctx context.Context, e *ChangeEventSink) error {
 
-	tw.Trace(ctx, "Procesando evento", "worker", tw.tableKey, "lsn", e.txEvent.LSN)
-
-	if e.changeEvent == nil || e.txEvent == nil {
-
-		tw.Error(ctx, "Change event or transaction event is nil", nil, "worker", tw.tableKey)
-
-		return fmt.Errorf("change event or transaction event is nil")
+	if e == nil {
+		return fmt.Errorf("change event is nil")
 	}
 
-	sinkEvent := e.changeEvent.ToChangeEventSink(e.txEvent.Xid, e.txEvent.LSN)
+	tw.Trace(ctx, "Procesando evento", "worker", tw.tableKey, "lsn", e.Lsn)
 
-	err := tw.sink.PersistEvent(ctx, sinkEvent, e.txEvent)
+	err := tw.sink.PersistSingleEvent(ctx, e)
 
 	if err != nil {
 
-		tw.Error(ctx, "Error persisting event", err, "worker", tw.tableKey, "lsn", e.txEvent.LSN)
+		tw.Error(ctx, "Error persisting event", err, "worker", tw.tableKey, "lsn", e.Lsn)
 
 		return err
 	}
 
-	if e.txEvent.LSN > 0 {
-		tw.lsnCoordinator.ReportLSN(ctx, tw.tableKey, e.txEvent.LSN)
+	if e.Lsn > 0 {
+		tw.lsnCoordinator.ReportLSN(ctx, tw.tableKey, e.Lsn)
 	}
 
 	return nil
@@ -84,16 +74,14 @@ func (tw *TableWorker) run(ctx context.Context) {
 			return
 		case event := <-tw.eventCh:
 
-			tw.Trace(ctx, "Procesando evento", "worker", tw.tableKey, "lsn", event.txEvent.LSN)
-
 			err := tw.processEvent(ctx, event)
 
 			if err != nil {
 				tw.Error(ctx, "Error processing event", err,
-					"table", tw.tableKey, "lsn", event.txEvent.LSN)
+					"table", tw.tableKey, "lsn", event.Lsn)
 			}
 
-			tw.Trace(ctx, "Evento procesado", "worker", tw.tableKey, "lsn", event.txEvent.LSN)
+			tw.Trace(ctx, "Evento procesado", "worker", tw.tableKey, "lsn", event.Lsn)
 
 		}
 	}
@@ -113,16 +101,13 @@ func (tw *TableWorker) Stop(ctx context.Context) {
 }
 
 func (tw *TableWorker) Process(ctx context.Context,
-	changeEvent *ChangeEvent,
-	txEvent *TransactionEvent) error {
-
-	workerEvent := &workerEvent{changeEvent: changeEvent, txEvent: txEvent}
+	changeEvent *ChangeEventSink) error {
 
 	if tw.eventCh == nil {
 		return fmt.Errorf("channel is closed")
 	}
 
-	tw.eventCh <- workerEvent
+	tw.eventCh <- changeEvent
 
 	return nil
 }

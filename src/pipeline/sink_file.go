@@ -92,14 +92,11 @@ type FileSink struct {
 	mu     sync.Mutex
 }
 
-func (fs *FileSink) PersistEvent(ctx context.Context,
-	changeEvent *ChangeEventSink, txEvent *TransactionEvent) error {
-	if changeEvent == nil || txEvent == nil {
-		return nil
-	}
+func (fs *FileSink) PersistSingleEvent(ctx context.Context,
+	changeEvent *ChangeEventSink) error {
 
-	if !txEvent.IsCommit {
-		return nil
+	if changeEvent == nil {
+		return fmt.Errorf("change event is nil")
 	}
 
 	fs.mu.Lock()
