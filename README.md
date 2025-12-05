@@ -268,10 +268,64 @@ Para una explicación detallada del flujo desde que se hace un commit en Postgre
 ## Monitoreo
 
 El conector expone métricas Prometheus en `/metrics`. Las métricas incluyen:
+
+### Métricas Estándar
 - Métricas estándar de Go (goroutines, memoria, GC)
 - Métricas de proceso del sistema
 
-> **Nota**: Actualmente no se exponen métricas de negocio (eventos procesados, lag de LSN, etc.). Esto está planificado para futuras versiones.
+### Métricas del Conector
+
+#### LSN (Log Sequence Number)
+- `connector_global_lsn`: LSN global mínimo de todos los workers (indica el progreso más conservador)
+- `connector_wal_end`: Posición WAL End leída del último keepalive de PostgreSQL
+- `connector_last_keepalive_timestamp`: Timestamp Unix del último keepalive recibido de PostgreSQL
+
+#### Transacciones
+- `connector_transactions_processed_total`: Contador total de transacciones procesadas
+- `connector_transactions_processed_by_worker_total`: Contador de transacciones procesadas por worker (labels: `worker`, `type`)
+  - `type` puede ser: `table` o `transaction`
+
+#### Workers
+- `connector_events_in_process_by_worker`: Número de eventos actualmente en proceso por worker (labels: `worker`, `type`)
+- `connector_worker_buffer_size`: Tamaño del buffer configurado para cada worker (labels: `worker`, `type`)
+
+### Ejemplo de Consultas Prometheus
+
+```promql
+# Tasa de transacciones procesadas por segundo
+rate(connector_transactions_processed_total[5m])
+
+# Transacciones procesadas por worker en la última hora
+increase(connector_transactions_processed_by_worker_total[1h])
+
+# Lag de LSN (diferencia entre WAL End y Global LSN)
+connector_wal_end - connector_global_lsn
+
+# Eventos en cola por worker
+connector_events_in_process_by_worker
+
+# Tiempo desde el último keepalive
+time() - connector_last_keepalive_timestamp
+```
+
+### Alertas Recomendadas
+
+```yaml
+# Lag de LSN muy alto (más de 1GB)
+- alert: HighLSNLag
+  expr: (connector_wal_end - connector_global_lsn) > 1073741824
+  for: 5m
+
+# Sin keepalive en los últimos 30 segundos
+- alert: NoKeepalive
+  expr: (time() - connector_last_keepalive_timestamp) > 30
+  for: 1m
+
+# Buffer de worker casi lleno (>80%)
+- alert: WorkerBufferHigh
+  expr: connector_events_in_process_by_worker / connector_worker_buffer_size > 0.8
+  for: 5m
+```
 
 ## Troubleshooting
 

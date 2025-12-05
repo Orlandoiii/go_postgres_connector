@@ -28,6 +28,7 @@ type Replicator struct {
 	lastSendTime time.Time
 	logger       observability.Logger
 	goFinalLSN   bool
+	metrics      *observability.ConnectorMetrics
 }
 
 func NewReplicator(sqlConn *pgx.Conn, replConn *pgconn.PgConn,
@@ -49,6 +50,7 @@ func NewReplicator(sqlConn *pgx.Conn, replConn *pgconn.PgConn,
 		slot:         slot,
 		lastSendTime: time.Time{},
 		goFinalLSN:   goFinalLSN,
+		metrics:      observability.GetConnectorMetrics(),
 	}, nil
 }
 
@@ -82,6 +84,11 @@ func (r *Replicator) handleKeepalive(ctx context.Context, data []byte) (bool, er
 	}
 
 	r.coordinator.SetWalEnd(pkm.ServerWALEnd)
+
+	// Actualizar métrica de último keepalive
+	if r.metrics != nil {
+		r.metrics.SetLastKeepalive(float64(time.Now().Unix()))
+	}
 
 	r.logger.Trace(ctx, "Keepalive procesado", "server_wal_end", pkm.ServerWALEnd.String())
 
@@ -269,6 +276,11 @@ func (r *Replicator) receiveLoop(ctx context.Context) error {
 						r.logger.Warn(ctx, "Error despachando evento, no avanzando LSN", err)
 
 						continue
+					}
+
+					// Incrementar contador de transacciones procesadas
+					if r.metrics != nil {
+						r.metrics.IncTransactionsProcessed()
 					}
 
 					shouldSendStatus = true

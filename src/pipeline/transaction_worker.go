@@ -17,6 +17,7 @@ type TransactionWorker struct {
 	wg             sync.WaitGroup
 	stopCh         chan struct{}
 	observability.Logger
+	metrics *observability.ConnectorMetrics
 }
 
 func NewTransactionWorker(groupKey string, lsnCoordinator *LSNCoordinator,
@@ -24,7 +25,7 @@ func NewTransactionWorker(groupKey string, lsnCoordinator *LSNCoordinator,
 	bufferSize int,
 	logger observability.Logger) *TransactionWorker {
 
-	return &TransactionWorker{
+	worker := &TransactionWorker{
 		groupKey:       groupKey,
 		lsnCoordinator: lsnCoordinator,
 		sink:           sink,
@@ -32,7 +33,15 @@ func NewTransactionWorker(groupKey string, lsnCoordinator *LSNCoordinator,
 		wg:             sync.WaitGroup{},
 		stopCh:         make(chan struct{}),
 		Logger:         logger,
+		metrics:        observability.GetConnectorMetrics(),
 	}
+
+	// Registrar tamaño inicial del buffer
+	if worker.metrics != nil {
+		worker.metrics.SetWorkerBufferSize(groupKey, "transaction", float64(bufferSize))
+	}
+
+	return worker
 }
 
 func (tw *TransactionWorker) processEvent(ctx context.Context, e *TransactionEvent) error {
@@ -74,12 +83,27 @@ func (tw *TransactionWorker) run(ctx context.Context) {
 				"group", tw.groupKey)
 			return
 		case event := <-tw.eventCh:
+			// Actualizar métrica de eventos en proceso
+			if tw.metrics != nil {
+				tw.metrics.SetEventsInProcess(tw.groupKey, "transaction", float64(len(tw.eventCh)))
+			}
+
 			tw.Trace(ctx, "Procesando transacción", "group", tw.groupKey, "lsn", event.LSN)
 
 			err := tw.processEvent(ctx, event)
 			if err != nil {
 				tw.Error(ctx, "Error processing transaction", err,
 					"group", tw.groupKey, "lsn", event.LSN)
+			} else {
+				// Incrementar contador de transacciones procesadas por worker
+				if tw.metrics != nil {
+					tw.metrics.IncTransactionsProcessedByWorker(tw.groupKey, "transaction")
+				}
+			}
+
+			// Actualizar métrica de eventos en proceso después de procesar
+			if tw.metrics != nil {
+				tw.metrics.SetEventsInProcess(tw.groupKey, "transaction", float64(len(tw.eventCh)))
 			}
 
 			tw.Trace(ctx, "Transacción procesada", "group", tw.groupKey, "lsn", event.LSN)

@@ -17,6 +17,7 @@ type TableWorker struct {
 	wg             sync.WaitGroup
 	stopCh         chan struct{}
 	observability.Logger
+	metrics *observability.ConnectorMetrics
 }
 
 func NewTableWorker(tableKey string, lsnCoordinator *LSNCoordinator,
@@ -24,7 +25,7 @@ func NewTableWorker(tableKey string, lsnCoordinator *LSNCoordinator,
 	bufferSize int,
 	logger observability.Logger) *TableWorker {
 
-	return &TableWorker{
+	worker := &TableWorker{
 		tableKey:       tableKey,
 		lsnCoordinator: lsnCoordinator,
 		sink:           sink,
@@ -32,7 +33,15 @@ func NewTableWorker(tableKey string, lsnCoordinator *LSNCoordinator,
 		wg:             sync.WaitGroup{},
 		stopCh:         make(chan struct{}),
 		Logger:         logger,
+		metrics:        observability.GetConnectorMetrics(),
 	}
+
+	// Registrar tamaño inicial del buffer
+	if worker.metrics != nil {
+		worker.metrics.SetWorkerBufferSize(tableKey, "table", float64(bufferSize))
+	}
+
+	return worker
 }
 
 func (tw *TableWorker) processEvent(ctx context.Context, e *ChangeEventSink) error {
@@ -74,12 +83,26 @@ func (tw *TableWorker) run(ctx context.Context) {
 				"table", tw.tableKey)
 			return
 		case event := <-tw.eventCh:
+			// Actualizar métrica de eventos en proceso
+			if tw.metrics != nil {
+				tw.metrics.SetEventsInProcess(tw.tableKey, "table", float64(len(tw.eventCh)))
+			}
 
 			err := tw.processEvent(ctx, event)
 
 			if err != nil {
 				tw.Error(ctx, "Error processing event", err,
 					"table", tw.tableKey, "lsn", event.Lsn)
+			} else {
+				// Incrementar contador de transacciones procesadas por worker
+				if tw.metrics != nil {
+					tw.metrics.IncTransactionsProcessedByWorker(tw.tableKey, "table")
+				}
+			}
+
+			// Actualizar métrica de eventos en proceso después de procesar
+			if tw.metrics != nil {
+				tw.metrics.SetEventsInProcess(tw.tableKey, "table", float64(len(tw.eventCh)))
 			}
 
 			tw.Trace(ctx, "Evento procesado", "worker", tw.tableKey, "lsn", event.Lsn)

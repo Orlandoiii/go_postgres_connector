@@ -14,6 +14,7 @@ type LSNCoordinator struct {
 	targetLSNs map[string]pglogrepl.LSN
 	observability.Logger
 	walEnd pglogrepl.LSN
+	metrics *observability.ConnectorMetrics
 }
 
 // NewLSNCoordinator crea un nuevo LSNCoordinator
@@ -22,6 +23,7 @@ func NewLSNCoordinator(logger observability.Logger) *LSNCoordinator {
 		mu:         sync.RWMutex{},
 		targetLSNs: make(map[string]pglogrepl.LSN),
 		Logger:     logger,
+		metrics:    observability.GetConnectorMetrics(),
 	}
 }
 
@@ -61,6 +63,9 @@ func (lc *LSNCoordinator) GetGlobalLSN() pglogrepl.LSN {
 	defer lc.mu.RUnlock()
 
 	if len(lc.targetLSNs) == 0 {
+		if lc.metrics != nil {
+			lc.metrics.SetGlobalLSN(pglogrepl.LSN(0))
+		}
 		return pglogrepl.LSN(0)
 	}
 
@@ -80,6 +85,11 @@ func (lc *LSNCoordinator) GetGlobalLSN() pglogrepl.LSN {
 		}
 	}
 
+	// Actualizar métrica sin bloquear
+	if lc.metrics != nil {
+		lc.metrics.SetGlobalLSN(minLsn)
+	}
+
 	return minLsn
 }
 
@@ -87,6 +97,10 @@ func (lc *LSNCoordinator) SetWalEnd(walEnd pglogrepl.LSN) {
 	lc.mu.Lock()
 	defer lc.mu.Unlock()
 	lc.walEnd = walEnd
+	// Actualizar métrica sin bloquear
+	if lc.metrics != nil {
+		lc.metrics.SetWalEnd(walEnd)
+	}
 }
 
 func (lc *LSNCoordinator) GetWalEnd() pglogrepl.LSN {

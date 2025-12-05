@@ -43,6 +43,9 @@ func replicate() {
 	// Crear servicio de métricas
 	metricsService := observability.NewMetricsService()
 
+	// Inicializar métricas del conector
+	observability.NewConnectorMetrics(metricsService.GetRegistry())
+
 	// Configurar servidor HTTP con Gin
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
