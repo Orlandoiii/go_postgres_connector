@@ -103,10 +103,14 @@ func replicate() {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
 
+	// Crear contexto cancelable para el connector
+	connectorCtx, connectorCancel := context.WithCancel(ctx)
+	defer connectorCancel()
+
 	// Iniciar connector en goroutine
 	connectorErrChan := make(chan error, 1)
 	go func() {
-		if err := connector.Start(ctx); err != nil {
+		if err := connector.Start(connectorCtx); err != nil {
 			connectorErrChan <- err
 		}
 	}()
@@ -115,8 +119,22 @@ func replicate() {
 	select {
 	case sig := <-sigChan:
 		logger.Info(ctx, "Received termination signal", "signal", sig.String())
+		// Cancelar contexto del connector para que termine
+		connectorCancel()
+		// Esperar a que el connector termine (con timeout)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		select {
+		case err := <-connectorErrChan:
+			if err != nil && err != context.Canceled {
+				logger.Warn(ctx, "Connector stopped with error", err)
+			}
+		case <-shutdownCtx.Done():
+			logger.Warn(ctx, "Timeout waiting for connector to stop", nil)
+		}
 	case err := <-connectorErrChan:
 		logger.Error(ctx, "Connector error", err)
+		connectorCancel()
 		panic(fmt.Sprintf("connector error: %v", err))
 	}
 }

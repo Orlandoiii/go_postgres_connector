@@ -163,6 +163,7 @@ func (dm *deliveryMonitor) run() {
 	for {
 		select {
 		case <-dm.ctx.Done():
+			dm.logger.Trace(dm.ctx, "DeliveryMonitor stopped by context")
 			return
 		case e := <-dm.producer.DeliveryReports:
 			if e == nil {

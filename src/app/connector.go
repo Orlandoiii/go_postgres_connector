@@ -3,10 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
-	"os"
-	"os/signal"
 	"runtime/debug"
-	"syscall"
 	"time"
 
 	"github.com/SOLUCIONESSYCOM/go_postgres_connector/src/config"
@@ -90,18 +87,8 @@ func (c *Connector) Start(ctx context.Context) error {
 
 	c.logger.Trace(ctx, "Iniciando Connector con configuración", "goFinalLSN", c.goFinalLSN)
 
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
-
-	go func() {
-		<-sigChan
-		c.logger.Info(ctx, "Señal de terminación recibida, cerrando...")
-		cancel()
-		time.Sleep(150 * time.Millisecond)
-	}()
+	// No crear un nuevo contexto cancelable aquí, usar el que viene del caller
+	// El caller ya maneja las señales
 
 	for {
 		if ctx.Err() != nil {

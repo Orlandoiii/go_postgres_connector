@@ -117,10 +117,36 @@ func (tw *TransactionWorker) Start(ctx context.Context) {
 }
 
 func (tw *TransactionWorker) Stop(ctx context.Context) {
-	tw.stopCh <- struct{}{}
-	close(tw.stopCh)
+	// Enviar señal de stop sin bloquear
+	select {
+	case tw.stopCh <- struct{}{}:
+	default:
+		// Si el canal ya está lleno, el worker ya sabe que debe detenerse
+	}
+
+	// Cerrar canales para que el worker sepa que debe terminar
 	close(tw.eventCh)
-	tw.wg.Wait()
+
+	// Esperar a que el worker termine (con timeout)
+	done := make(chan struct{})
+	go func() {
+		tw.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Worker terminó correctamente
+	case <-ctx.Done():
+		// Timeout o contexto cancelado
+		tw.Warn(ctx, "Timeout waiting for transaction worker to stop", nil, "group", tw.groupKey)
+	case <-time.After(5 * time.Second):
+		// Timeout de seguridad
+		tw.Warn(ctx, "Timeout waiting for transaction worker to stop", nil, "group", tw.groupKey)
+	}
+
+	// Cerrar stopCh al final para evitar panics
+	close(tw.stopCh)
 }
 
 func (tw *TransactionWorker) Process(ctx context.Context, txEvent *TransactionEvent) error {
