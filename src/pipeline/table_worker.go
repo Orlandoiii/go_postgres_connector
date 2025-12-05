@@ -43,6 +43,13 @@ func (tw *TableWorker) processEvent(ctx context.Context, e *workerEvent) error {
 
 	tw.Trace(ctx, "Procesando evento", "worker", tw.tableKey, "lsn", e.txEvent.LSN)
 
+	if e.changeEvent == nil || e.txEvent == nil {
+
+		tw.Error(ctx, "Change event or transaction event is nil", nil, "worker", tw.tableKey)
+
+		return fmt.Errorf("change event or transaction event is nil")
+	}
+
 	sinkEvent := e.changeEvent.ToChangeEventSink(e.txEvent.Xid, e.txEvent.LSN)
 
 	err := tw.sink.PersistEvent(ctx, sinkEvent, e.txEvent)
