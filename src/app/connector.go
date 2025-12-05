@@ -49,21 +49,21 @@ func NewConnector(ctx context.Context) (*Connector, error) {
 	coordinator := pipeline.NewLSNCoordinator(logger)
 
 	var sinkFactory pipeline.SinkFactory
-	// kafkaCfg, err := config.KafkaCfg()
+	kafkaCfg, err := config.KafkaCfg()
 
-	// if err != nil {
-	// 	return nil, fmt.Errorf("load kafka config: %w", err)
-	// }
+	if err != nil {
+		return nil, fmt.Errorf("load kafka config: %w", err)
+	}
 
-	// kafkaSinkFactory, err := pipeline.NewKafkaSinkFactory(kafkaCfg, logger)
-	// if err != nil {
-	// 	return nil, fmt.Errorf("create kafka sink factory: %w", err)
-	// }
-	// sinkFactory = kafkaSinkFactory
+	kafkaSinkFactory, err := pipeline.NewKafkaSinkFactory(kafkaCfg, logger)
+	if err != nil {
+		return nil, fmt.Errorf("create kafka sink factory: %w", err)
+	}
+	sinkFactory = kafkaSinkFactory
 	logger.Info(ctx, "Usando Kafka sink")
 
-	sinkFactory = pipeline.NewFileSinkFactory("output", logger)
-	logger.Info(ctx, "Usando File sink")
+	// sinkFactory = pipeline.NewFileSinkFactory("output", logger)
+	// logger.Info(ctx, "Usando File sink")
 
 	filterFactory := expressions.NewExpressionFilterFactory(logger)
 
@@ -204,19 +204,33 @@ func (c *Connector) Close(ctx context.Context) error {
 
 	c.logger.Trace(ctx, "Cerrando Connector")
 
-	if c.replicator != nil {
-		c.replicator.Close()
-	}
+	// Primero detener el dispatcher para que los workers terminen de procesar
 	if c.dispatcher != nil {
+		c.logger.Trace(ctx, "Deteniendo dispatcher")
 		c.dispatcher.Stop(ctx)
 	}
+
+	// Luego cerrar el replicator (esto cierra la conexión de replicación)
+	if c.replicator != nil {
+		c.logger.Trace(ctx, "Cerrando replicator")
+		c.replicator.Close()
+		c.replicator = nil
+	}
+
+	// Cerrar sink factory
 	if c.sinkFactory != nil {
 		if closer, ok := c.sinkFactory.(interface{ Close() error }); ok {
+			c.logger.Trace(ctx, "Cerrando sink factory")
 			closer.Close()
 		}
 	}
+
+	// Finalmente cerrar las conexiones
 	if c.connManager != nil {
+		c.logger.Trace(ctx, "Cerrando connection manager")
 		c.connManager.Close(ctx)
 	}
+
+	c.logger.Trace(ctx, "Connector cerrado")
 	return nil
 }

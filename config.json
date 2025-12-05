@@ -1,11 +1,14 @@
 {
+    "Server":{
+        "HttpPort": 9090
+    },
     "Log": {
         "Enabled": true,
         "Console": true,
         "BeutifyConsoleLog": false,
-        "File": true,
+        "File": false,
         "FilePath": "D:\\SYPAGO_DATA\\postgres_connector\\logs",
-        "MinLevel": "TRACE",
+        "MinLevel": "INFO",
         "RotationMaxSizeMB": 10,
         "MaxAgeDay": 30,
         "MaxBackups": 5,

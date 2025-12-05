@@ -15,6 +15,10 @@ var cfg *configuro.AppConfig
 
 var poolKeys = []string{"pool_min_conns", "pool_max_conns"}
 
+type ServerConfig struct {
+	HttpPort int `json:"HttpPort"`
+}
+
 type Condition struct {
 	Field    string      `json:"Field"`
 	Operator string      `json:"Operator"`
@@ -199,6 +203,22 @@ func KafkaCfg() (*KafkaConfig, error) {
 	}
 
 	return &KafkaConfig{kafkaConfig: kafkaConfigJson}, nil
+}
+
+func ServerCfg() (*ServerConfig, error) {
+	if cfg == nil || !cfg.IsBeenLoaded() {
+		err := loadConfig()
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	serverConfig, err := configuro.GetSection[ServerConfig](cfg, "Server")
+	if err != nil {
+		return nil, fmt.Errorf("error al obtener la configuración del servidor: %w", err)
+	}
+
+	return serverConfig, nil
 }
 
 func init() {

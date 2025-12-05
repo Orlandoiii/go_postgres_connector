@@ -83,6 +83,11 @@ func (d *Dispatcher) getOrCreateWorker(ctx context.Context, workerKey string) *T
 		return nil
 	}
 
+	// Pasar el coordinator al sink si tiene el método SetCoordinator
+	if sinkWithCoordinator, ok := sink.(interface{ SetCoordinator(*LSNCoordinator) }); ok {
+		sinkWithCoordinator.SetCoordinator(d.coordinator)
+	}
+
 	worker = NewTableWorker(workerKey, d.coordinator, sink, d.workerBufferSize, d.logger)
 
 	worker.Start(ctx)
@@ -176,6 +181,11 @@ func (d *Dispatcher) getOrCreateTransactionWorker(ctx context.Context, groupKey 
 		d.logger.Error(ctx, "Error creating sink for transaction worker", err,
 			"group", groupKey)
 		return nil
+	}
+
+	// Pasar el coordinator al sink si tiene el método SetCoordinator
+	if sinkWithCoordinator, ok := sink.(interface{ SetCoordinator(*LSNCoordinator) }); ok {
+		sinkWithCoordinator.SetCoordinator(d.coordinator)
 	}
 
 	worker = NewTransactionWorker(groupKey, d.coordinator, sink, d.workerBufferSize, d.logger)

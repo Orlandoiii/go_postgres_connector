@@ -53,10 +53,21 @@ func NewReplicator(sqlConn *pgx.Conn, replConn *pgconn.PgConn,
 }
 
 func (r *Replicator) Close() error {
-	r.logger.Trace(context.Background(), "Cerrando replicator")
+	ctx := context.Background()
+	r.logger.Trace(ctx, "Cerrando replicator")
 
+	// Cerrar conexión de replicación
+	if r.replConn != nil {
+		r.logger.Trace(ctx, "Cerrando conexión de replicación")
+		if err := r.replConn.Close(ctx); err != nil {
+			r.logger.Warn(ctx, "Error cerrando conexión de replicación", err)
+		}
+		r.replConn = nil
+	}
+
+	// Detener dispatcher
 	if r.dispatcher != nil {
-		r.dispatcher.Stop(context.Background())
+		r.dispatcher.Stop(ctx)
 	}
 	return nil
 }
@@ -156,6 +167,11 @@ func (r *Replicator) receiveLoop(ctx context.Context) error {
 	shouldSendStatus := false
 
 	for {
+		// Verificar si el contexto fue cancelado
+		if ctx.Err() != nil {
+			r.logger.Info(ctx, "Contexto cancelado, saliendo del bucle de recepción")
+			return ctx.Err()
+		}
 
 		consumeTime := time.Now()
 		receiveCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -170,6 +186,11 @@ func (r *Replicator) receiveLoop(ctx context.Context) error {
 		shouldSendStatus = false
 
 		if err != nil {
+			// Verificar si el contexto fue cancelado
+			if errors.Is(err, context.Canceled) || ctx.Err() != nil {
+				r.logger.Info(ctx, "Contexto cancelado durante recepción de mensaje")
+				return ctx.Err()
+			}
 
 			if errors.Is(err, context.DeadlineExceeded) {
 
