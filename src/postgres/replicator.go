@@ -53,6 +53,8 @@ func NewReplicator(sqlConn *pgx.Conn, replConn *pgconn.PgConn,
 }
 
 func (r *Replicator) Close() error {
+	r.logger.Trace(context.Background(), "Cerrando replicator")
+
 	if r.dispatcher != nil {
 		r.dispatcher.Stop(context.Background())
 	}
@@ -60,34 +62,23 @@ func (r *Replicator) Close() error {
 }
 
 func (r *Replicator) handleKeepalive(ctx context.Context, data []byte) (bool, error) {
+	r.logger.Trace(ctx, "Procesando keepalive")
+
 	pkm, err := pglogrepl.ParsePrimaryKeepaliveMessage(data)
 
 	if err != nil {
 		return false, fmt.Errorf("parse keepalive: %w", err)
 	}
 
-	coordinatorLSN := r.coordinator.GetGlobalLSN()
+	r.coordinator.SetWalEnd(pkm.ServerWALEnd)
 
-	if coordinatorLSN > 0 {
+	r.logger.Trace(ctx, "Keepalive procesado", "server_wal_end", pkm.ServerWALEnd.String())
 
-		if coordinatorLSN < pkm.ServerWALEnd {
-			r.currentLSN = coordinatorLSN
-		} else {
-			r.currentLSN = pkm.ServerWALEnd
-		}
+	if !r.dispatcher.HasPendingEvents() {
 
-	} else if r.coordinator.HasRegisteredTables() {
+		r.currentLSN = r.coordinator.GetWalEnd()
 
-		r.logger.Debug(ctx, "Keepalive recibido pero coordinator tiene tablas sin LSN, manteniendo LSN actual",
-			"current_lsn", r.currentLSN.String(),
-			"server_wal_end", pkm.ServerWALEnd.String())
-
-	} else {
-
-		r.logger.Debug(ctx, "Keepalive recibido pero coordinator no tiene tablas registradas, manteniendo LSN actual",
-			"current_lsn", r.currentLSN.String(),
-			"server_wal_end", pkm.ServerWALEnd.String())
-		r.currentLSN = pkm.ServerWALEnd
+		return pkm.ReplyRequested, nil
 	}
 
 	return pkm.ReplyRequested, nil
@@ -95,6 +86,8 @@ func (r *Replicator) handleKeepalive(ctx context.Context, data []byte) (bool, er
 
 func (r *Replicator) handleXLogData(ctx context.Context, data []byte,
 	consumeTime time.Time, tr *pipeline.TransactionEvent) (pglogrepl.LSN, error) {
+
+	r.logger.Trace(ctx, "Procesando XLogData")
 
 	xld, err := pglogrepl.ParseXLogData(data)
 
@@ -109,7 +102,7 @@ func (r *Replicator) handleXLogData(ctx context.Context, data []byte,
 		"wal_end", xld.ServerWALEnd.String(),
 		"server_time", xld.ServerTime.Format("2006-01-02 15:04:05"))
 
-	walEnd := xld.WALStart + pglogrepl.LSN(len(xld.WALData))
+	r.coordinator.SetWalEnd(xld.ServerWALEnd)
 
 	if len(xld.WALData) > 0 {
 
@@ -126,13 +119,16 @@ func (r *Replicator) handleXLogData(ctx context.Context, data []byte,
 		}
 	}
 
-	return walEnd, nil
+	return xld.ServerWALEnd, nil
 }
 
 func (r *Replicator) sendStatusUpdate(ctx context.Context, currentLSN pglogrepl.LSN) {
 
 	r.logger.Info(ctx, "Enviando ACK",
 		"lsn", currentLSN.String())
+
+	r.logger.Trace(ctx, "Enviando ACK", "lsn",
+		currentLSN.String())
 
 	err := pglogrepl.SendStandbyStatusUpdate(ctx, r.replConn,
 		pglogrepl.StandbyStatusUpdate{
@@ -149,6 +145,8 @@ func (r *Replicator) sendStatusUpdate(ctx context.Context, currentLSN pglogrepl.
 			"timestamp", time.Now().Format("2006-01-02 15:04:05"))
 	} else {
 		r.lastSendTime = time.Now()
+		r.logger.Trace(ctx, "ACK enviado", "lsn", currentLSN.String())
+
 	}
 }
 
@@ -160,9 +158,14 @@ func (r *Replicator) receiveLoop(ctx context.Context) error {
 	for {
 
 		consumeTime := time.Now()
-		receiveCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		receiveCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+
+		r.logger.Trace(ctx, "Receiving message")
+
 		msg, err := r.replConn.ReceiveMessage(receiveCtx)
 		cancel()
+
+		r.logger.Trace(ctx, "Message received", "message", msg)
 
 		shouldSendStatus = false
 
@@ -170,8 +173,23 @@ func (r *Replicator) receiveLoop(ctx context.Context) error {
 
 			if errors.Is(err, context.DeadlineExceeded) {
 
+				r.logger.Trace(ctx, "Timeout received", "last_send_time", r.lastSendTime.Format("2006-01-02 15:04:05"))
+
 				if time.Since(r.lastSendTime) > 5*time.Second {
+
+					r.currentLSN = r.coordinator.GetGlobalLSN()
+
+					if !r.dispatcher.HasPendingEvents() {
+						r.logger.Trace(ctx, "No hay eventos pendientes, seteando LSN a WalEnd", "wal_end",
+							r.coordinator.GetWalEnd().String())
+						r.currentLSN = r.coordinator.GetWalEnd()
+					} else {
+						r.logger.Trace(ctx, "Hay eventos pendientes, manteniendo LSN actual", "current_lsn",
+							r.currentLSN.String())
+					}
 					r.sendStatusUpdate(ctx, r.currentLSN)
+
+					r.logger.Trace(ctx, "Sending status update", "lsn", r.currentLSN.String())
 				}
 
 				continue
@@ -210,7 +228,7 @@ func (r *Replicator) receiveLoop(ctx context.Context) error {
 
 			case pglogrepl.XLogDataByteID:
 
-				walEnd, err := r.handleXLogData(ctx, msg.Data[1:], consumeTime, tr)
+				_, err = r.handleXLogData(ctx, msg.Data[1:], consumeTime, tr)
 
 				if err != nil {
 
@@ -221,47 +239,22 @@ func (r *Replicator) receiveLoop(ctx context.Context) error {
 
 				if tr != nil && tr.IsCommit {
 
-					if err := r.dispatcher.Dispatch(ctx, tr); err != nil {
+					r.logger.Trace(ctx, "Dispatching transaction", "transaction_lsn", tr.LSN.String())
+
+					err = r.dispatcher.Dispatch(ctx, tr)
+
+					if err != nil {
 
 						r.logger.Warn(ctx, "Error despachando evento, no avanzando LSN", err)
-
-						tr = &pipeline.TransactionEvent{}
 
 						continue
 					}
 
-					coordinatorLSN := r.coordinator.GetGlobalLSN()
-
-					if coordinatorLSN > 0 {
-
-						r.currentLSN = coordinatorLSN
-
-					} else if r.coordinator.HasRegisteredTables() {
-
-						r.logger.Debug(ctx, "Coordinator tiene tablas registradas pero LSN es 0, manteniendo LSN actual hasta primer reporte",
-							"current_lsn", r.currentLSN.String(),
-							"tx_lsn", tr.LSN.String())
-
-					} else {
-
-						r.logger.Debug(ctx, "No hay tablas registradas aún, usando walEnd",
-							"wal_end", walEnd.String())
-
-						r.currentLSN = walEnd
-					}
+					shouldSendStatus = true
 
 					tr = &pipeline.TransactionEvent{}
 
-				} else {
-
-					r.logger.Debug(ctx, "Transacción no completada o sin transacción, manteniendo LSN actual",
-						"current_lsn", r.currentLSN.String(),
-						"wal_end", walEnd.String(),
-						"has_transaction", tr != nil,
-						"is_commit", tr != nil && tr.IsCommit)
 				}
-
-				shouldSendStatus = true
 
 			default:
 				r.logger.Warn(ctx, "Mensaje CopyData desconocido",
@@ -280,12 +273,18 @@ func (r *Replicator) receiveLoop(ctx context.Context) error {
 
 		if shouldSendStatus || time.Since(r.lastSendTime) > 5*time.Second {
 
+			r.logger.Trace(ctx, "End of loop replication loop, Sending status update",
+				"should_send_status", shouldSendStatus,
+				"last_send_time", r.lastSendTime.Format("2006-01-02 15:04:05"))
+
 			coordinatorLSN := r.coordinator.GetGlobalLSN()
 
 			if coordinatorLSN > 0 && coordinatorLSN > r.currentLSN {
 				r.currentLSN = coordinatorLSN
 			}
-
+			if !r.dispatcher.HasPendingEvents() {
+				r.currentLSN = r.coordinator.GetWalEnd()
+			}
 			r.sendStatusUpdate(ctx, r.currentLSN)
 		}
 	}
@@ -364,6 +363,8 @@ func (r *Replicator) Start(ctx context.Context) error {
 	}
 
 	r.currentLSN = lastLSN
+
+	r.logger.Trace(ctx, "Last LSN", "last_lsn", lastLSN.String())
 
 	err = pglogrepl.StartReplication(ctx, r.replConn, r.slot, lastLSN,
 		pglogrepl.StartReplicationOptions{

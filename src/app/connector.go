@@ -87,6 +87,9 @@ func NewConnector(ctx context.Context) (*Connector, error) {
 }
 
 func (c *Connector) Start(ctx context.Context) error {
+
+	c.logger.Trace(ctx, "Iniciando Connector con configuración", "goFinalLSN", c.goFinalLSN)
+
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -169,12 +172,14 @@ func (c *Connector) cleanupReplicator() {
 }
 
 func (c *Connector) cleanupConnections(ctx context.Context) {
+	c.logger.Trace(ctx, "Cerrando conexiones")
 	if c.connManager != nil {
 		c.connManager.Close(ctx)
 	}
 }
 
 func (c *Connector) runReplication(ctx context.Context, replicator *postgres.Replicator) error {
+	c.logger.Trace(ctx, "Iniciando replicación")
 	return replicator.Start(ctx)
 }
 
@@ -196,6 +201,8 @@ func (c *Connector) recoverPanic(ctx context.Context, operation string) {
 }
 
 func (c *Connector) Close(ctx context.Context) error {
+
+	c.logger.Trace(ctx, "Cerrando Connector")
 
 	if c.replicator != nil {
 		c.replicator.Close()

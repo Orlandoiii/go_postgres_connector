@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"context"
 	"sync"
 
 	"github.com/SOLUCIONESSYCOM/go_postgres_connector/src/observability"
@@ -8,11 +9,11 @@ import (
 	"github.com/jackc/pglogrepl"
 )
 
-// LSNCoordinator es el coordinador de los LSNs de las tablas
 type LSNCoordinator struct {
 	mu         sync.RWMutex
 	targetLSNs map[string]pglogrepl.LSN
 	observability.Logger
+	walEnd pglogrepl.LSN
 }
 
 // NewLSNCoordinator crea un nuevo LSNCoordinator
@@ -41,9 +42,11 @@ func (lc *LSNCoordinator) RegisterTable(workerKey string) {
 	lc.targetLSNs[workerKey] = pglogrepl.LSN(0)
 }
 
-func (lc *LSNCoordinator) ReportLSN(workerKey string, lsn pglogrepl.LSN) {
+func (lc *LSNCoordinator) ReportLSN(ctx context.Context, workerKey string, lsn pglogrepl.LSN) {
 	lc.mu.Lock()
 	defer lc.mu.Unlock()
+
+	lc.Trace(ctx, "Reportando LSN", "worker", workerKey, "lsn", lsn)
 
 	current, exists := lc.targetLSNs[workerKey]
 
@@ -78,4 +81,16 @@ func (lc *LSNCoordinator) GetGlobalLSN() pglogrepl.LSN {
 	}
 
 	return minLsn
+}
+
+func (lc *LSNCoordinator) SetWalEnd(walEnd pglogrepl.LSN) {
+	lc.mu.Lock()
+	defer lc.mu.Unlock()
+	lc.walEnd = walEnd
+}
+
+func (lc *LSNCoordinator) GetWalEnd() pglogrepl.LSN {
+	lc.mu.RLock()
+	defer lc.mu.RUnlock()
+	return lc.walEnd
 }

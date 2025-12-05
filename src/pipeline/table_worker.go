@@ -41,14 +41,19 @@ func NewTableWorker(tableKey string, lsnCoordinator *LSNCoordinator,
 
 func (tw *TableWorker) processEvent(ctx context.Context, e *workerEvent) error {
 
+	tw.Trace(ctx, "Procesando evento", "worker", tw.tableKey, "lsn", e.txEvent.LSN)
+
 	err := tw.sink.PersistEvent(ctx, e.changeEvent, e.txEvent)
 
 	if err != nil {
+
+		tw.Error(ctx, "Error persisting event", err, "worker", tw.tableKey, "lsn", e.txEvent.LSN)
+
 		return err
 	}
 
-	if e.txEvent.IsCommit && e.txEvent.LSN > 0 {
-		tw.lsnCoordinator.ReportLSN(tw.tableKey, e.txEvent.LSN)
+	if e.txEvent.LSN > 0 {
+		tw.lsnCoordinator.ReportLSN(ctx, tw.tableKey, e.txEvent.LSN)
 	}
 
 	return nil
@@ -70,12 +75,16 @@ func (tw *TableWorker) run(ctx context.Context) {
 			return
 		case event := <-tw.eventCh:
 
+			tw.Trace(ctx, "Procesando evento", "worker", tw.tableKey, "lsn", event.txEvent.LSN)
+
 			err := tw.processEvent(ctx, event)
 
 			if err != nil {
 				tw.Error(ctx, "Error processing event", err,
 					"table", tw.tableKey, "lsn", event.txEvent.LSN)
 			}
+
+			tw.Trace(ctx, "Evento procesado", "worker", tw.tableKey, "lsn", event.txEvent.LSN)
 
 		}
 	}
