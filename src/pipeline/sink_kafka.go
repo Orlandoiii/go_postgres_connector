@@ -244,6 +244,12 @@ func (dm *deliveryMonitor) registerTransaction(xid uint32,
 	}
 }
 
+func (dm *deliveryMonitor) unregisterTransaction(xid uint32) {
+	dm.mu.Lock()
+	defer dm.mu.Unlock()
+	delete(dm.pendingTx, xid)
+}
+
 type KafkaSink struct {
 	factory     *KafkaSinkFactory
 	topic       string
@@ -290,6 +296,10 @@ func (ks *KafkaSink) PersistSingleEvent(ctx context.Context,
 
 		err := ks.producer.ProduceMessageAsync(ks.topic, jsonData, metadata)
 		if err != nil {
+			// Desregistrar transacción si falla inmediatamente para evitar LSN bloqueado
+			if changeEvent.Lsn > 0 && changeEvent.Xid > 0 {
+				ks.monitor.unregisterTransaction(changeEvent.Xid)
+			}
 			ks.logger.Error(ctx, "Error produciendo mensaje en Kafka", err,
 				"topic", ks.topic, "xid", changeEvent.Xid)
 		}
@@ -328,6 +338,10 @@ func (ks *KafkaSink) PersistTransaction(ctx context.Context,
 
 		err := ks.producer.ProduceMessageAsync(ks.topic, jsonData, metadata)
 		if err != nil {
+			// Desregistrar transacción si falla inmediatamente para evitar LSN bloqueado
+			if txEvent.LSN > 0 && txEvent.Xid > 0 {
+				ks.monitor.unregisterTransaction(txEvent.Xid)
+			}
 			ks.logger.Error(ctx, "Error produciendo transacción en Kafka", err,
 				"topic", ks.topic, "xid", txEvent.Xid)
 		}

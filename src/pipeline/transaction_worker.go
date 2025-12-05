@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/SOLUCIONESSYCOM/go_postgres_connector/src/observability"
 )
@@ -103,8 +104,16 @@ func (tw *TransactionWorker) Process(ctx context.Context, txEvent *TransactionEv
 		return fmt.Errorf("channel is closed")
 	}
 
-	tw.eventCh <- txEvent
-	return nil
+	//Patron para evitar bloqueos en el canal
+
+	select {
+	case tw.eventCh <- txEvent:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(5 * time.Second):
+		return fmt.Errorf("worker buffer full, timeout after 5s")
+	}
 }
 
 func (tw *TransactionWorker) PendingEvents() int {

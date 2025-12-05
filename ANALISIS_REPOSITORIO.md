@@ -18,7 +18,7 @@ Este repositorio implementa un conector de replicación lógica de PostgreSQL a 
 - ✅ Workers separados para eventos individuales y transacciones completas
 
 **Debilidades:**
-- ⚠️ Falta de documentación arquitectónica (no hay README, diagramas, o documentación de diseño)
+- ✅ **CORREGIDO**: Se agregó README.md y FLUJO.md con documentación completa
 - ⚠️ Algunos paquetes tienen responsabilidades mezcladas (ej: `expressions` contiene lógica de filtrado y evaluación)
 
 ### 1.2. Flujo de Datos
@@ -113,8 +113,7 @@ type DeadLetterQueue interface {
 - ✅ Reporte de LSN después de procesar
 
 **Problemas Críticos:**
-- 🔴 **Línea 110 (table_worker)**: `tw.eventCh <- changeEvent` puede bloquearse si el buffer está lleno - no hay backpressure handling
-- 🔴 **Línea 106 (transaction_worker)**: Mismo problema - si el buffer está lleno, el dispatcher se bloquea
+- ✅ **CORREGIDO**: Se agregó timeout de 5 segundos en `Process()` para evitar bloqueos cuando el buffer está lleno (table_worker.go línea 110-117, transaction_worker.go línea 106-113)
 - ⚠️ Si `PersistSingleEvent` o `PersistTransaction` fallan, el error se loguea pero el evento se pierde
 - ⚠️ No hay retry logic para fallos transitorios de Kafka
 
@@ -142,8 +141,8 @@ func (tw *TableWorker) Process(ctx context.Context, changeEvent *ChangeEventSink
 - ✅ Compartir producers por topic (optimización de recursos)
 
 **Problemas Críticos:**
-- 🔴 **Línea 291-295**: Si `ProduceMessageAsync` falla, el error se loguea pero el LSN ya fue registrado en el monitor (línea 284) - esto causa que el LSN nunca se reporte
-- 🔴 **Línea 190-195**: Si hay error en delivery, se elimina la transacción del mapa pero no se reporta el error al coordinador - el LSN se queda bloqueado
+- ✅ **CORREGIDO**: Se agregó método `unregisterTransaction()` y se llama cuando `ProduceMessageAsync` falla inmediatamente, evitando que el LSN quede bloqueado (sink_kafka.go líneas 228-245, 291-296, 329-334)
+- 🔴 **Línea 190-195**: Si hay error en delivery (después de enviar), se elimina la transacción del mapa pero no se reporta el error al coordinador - el LSN se queda bloqueado
 - ⚠️ **Línea 287-296**: Se lanza una goroutine por cada mensaje - con alto throughput esto puede crear demasiadas goroutines a pesar del semáforo
 - ⚠️ No hay retry para mensajes fallidos
 - ⚠️ El `deliveryMonitor` puede tener memory leak si hay transacciones que nunca se confirman
@@ -307,10 +306,10 @@ Implementar al menos:
 ## 10. Documentación
 
 ### 10.1. Estado Actual
-- 🔴 **No hay README**
-- 🔴 **No hay documentación de arquitectura**
-- 🔴 **No hay documentación de API**
-- 🔴 **No hay guías de deployment**
+- ✅ **COMPLETADO**: Se agregó README.md con explicación completa del repositorio, configuración, arquitectura y uso
+- ✅ **COMPLETADO**: Se agregó FLUJO.md con explicación detallada del flujo de datos desde PostgreSQL hasta Kafka, entendible para no técnicos
+- ⚠️ **No hay documentación de API** (no aplicable, no es una API REST)
+- ⚠️ **No hay guías de deployment** detalladas (información básica en README)
 - ⚠️ Comentarios mínimos en el código
 
 ### 10.2. Impacto
@@ -323,26 +322,29 @@ Sin documentación:
 
 ## 11. Evaluación General
 
-### 11.1. Nivel del Repositorio: **Intermedio-Avanzado (7/10)**
+### 11.1. Nivel del Repositorio: **Intermedio-Avanzado (7.5/10)** ⬆️
 
 **Justificación:**
 - ✅ Arquitectura bien pensada y modular
 - ✅ Implementación de funcionalidades complejas (agrupación, filtrado, LSN tracking)
 - ✅ Uso adecuado de patrones de diseño
+- ✅ Documentación completa (README.md, FLUJO.md)
+- ✅ Fixes críticos implementados (backpressure, LSN bloqueado)
 - 🔴 Falta crítica de tests
-- 🔴 Problemas de robustez (pérdida de datos, bloqueo de LSN)
-- 🔴 Falta de documentación
+- ⚠️ Algunos problemas de robustez aún presentes (retry logic, dead letter queue)
 
-### 11.2. Nivel del Conector: **Intermedio (6.5/10)**
+### 11.2. Nivel del Conector: **Intermedio-Avanzado (7/10)** ⬆️
 
 **Justificación:**
 - ✅ Funcionalidad core implementada correctamente
 - ✅ Lógica inteligente de LSN tracking
 - ✅ Soporte para casos de uso complejos
-- 🔴 No es production-ready debido a:
-  - Pérdida de datos en caso de fallos
-  - Falta de retry logic
-  - Falta de observabilidad adecuada
+- ✅ Mejoras de robustez implementadas (backpressure, LSN bloqueado)
+- ✅ Documentación completa
+- ⚠️ Aún no es completamente production-ready debido a:
+  - Falta de retry logic para fallos transitorios
+  - Falta de dead letter queue
+  - Falta de observabilidad adecuada (métricas de negocio)
   - Falta de tests
 
 ---
@@ -352,9 +354,9 @@ Sin documentación:
 ### Prioridad ALTA (Crítica)
 1. **Implementar retry logic para Kafka** - Evitar pérdida de datos
 2. **Agregar dead letter queue** - No perder eventos en caso de errores
-3. **Fix bug de LSN bloqueado** - Si Kafka falla, el LSN no debe quedarse bloqueado
+3. ✅ **COMPLETADO**: Fix bug de LSN bloqueado - Se agregó `unregisterTransaction()` para desregistrar cuando ProduceMessageAsync falla inmediatamente
 4. **Implementar tests básicos** - Al menos para componentes críticos
-5. **Fix backpressure en workers** - Evitar bloqueo cuando buffers están llenos
+5. ✅ **COMPLETADO**: Fix backpressure en workers - Se agregó timeout de 5 segundos en `Process()` de ambos workers
 
 ### Prioridad MEDIA
 6. **Agregar métricas de negocio** - Eventos procesados, fallidos, lag
@@ -375,15 +377,28 @@ Sin documentación:
 
 Este es un proyecto **bien arquitecturado** con **implementación sólida** de funcionalidades complejas. El diseño del LSNCoordinator y la lógica de agrupación por transacciones demuestran comprensión profunda del dominio.
 
-Sin embargo, **no es production-ready** debido a:
+### Mejoras Recientes (Post-Análisis)
+
+Se han implementado las siguientes mejoras críticas:
+
+1. ✅ **Fix de backpressure en workers**: Se agregó timeout de 5 segundos en `Process()` para evitar bloqueos cuando los buffers están llenos
+2. ✅ **Fix de LSN bloqueado**: Se implementó `unregisterTransaction()` para desregistrar transacciones cuando `ProduceMessageAsync` falla inmediatamente, evitando que el LSN quede bloqueado
+3. ✅ **Documentación completa**: Se agregó README.md con explicación del repositorio, configuración y arquitectura
+4. ✅ **Documentación de flujo**: Se agregó FLUJO.md con explicación detallada y entendible del flujo de datos
+
+### Estado Actual
+
+**Aún no es completamente production-ready** debido a:
 - Falta crítica de tests
-- Problemas de robustez que pueden causar pérdida de datos
-- Falta de observabilidad adecuada
-- Falta de documentación
+- Algunos problemas de robustez que pueden causar pérdida de datos (retry logic, dead letter queue)
+- Falta de observabilidad adecuada (métricas de negocio)
 
-**Con las mejoras recomendadas (especialmente las de prioridad ALTA), este conector podría alcanzar un nivel de producción enterprise-grade.**
+**Sin embargo, con las mejoras implementadas:**
+- Se han resuelto 2 problemas críticos de bloqueo
+- Se ha mejorado significativamente la documentación
+- El conector es más robusto ante fallos inmediatos de Kafka
 
-**Tiempo estimado para hacerlo production-ready:** 2-3 sprints (4-6 semanas) con un desarrollador dedicado.
+**Tiempo estimado restante para hacerlo production-ready:** 1-2 sprints (2-4 semanas) con un desarrollador dedicado, enfocándose en tests y retry logic.
 
 ---
 
