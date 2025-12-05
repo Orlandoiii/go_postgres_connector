@@ -29,7 +29,33 @@
                 "Actions": [
                     "insert",
                     "update"
-                ]
+                ],
+                "Pipeline": {
+                    "Targets": [
+                        {
+                            "Name": "transactions_insert_update",
+                            "Group": "transactions_grouped",
+                            "SendAsTransaction": true,
+                            "Filter": {
+                                "Actions": [
+                                    "insert",
+                                    "update"
+                                ]
+                            }
+                        },
+                        {
+                            "Name": "transactions_individual",
+                            "Group": "",
+                            "SendAsTransaction": false,
+                            "Filter": {
+                                "Actions": [
+                                    "insert",
+                                    "update"
+                                ]
+                            }
+                        }
+                    ]
+                }
             },
             {
                 "Publication": "pub_transaction_delivery_trace",
@@ -66,6 +92,8 @@
                         },
                         {
                             "Name": "transaction_process_entries_all",
+                            "Group": "transactions_grouped",
+                            "SendAsTransaction": true,
                             "Filter": {
                                 "Actions": [
                                     "insert",

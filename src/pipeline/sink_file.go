@@ -118,6 +118,33 @@ func (fs *FileSink) PersistSingleEvent(ctx context.Context,
 	return nil
 }
 
+func (fs *FileSink) PersistTransaction(ctx context.Context,
+	txEvent *TransactionEvent) error {
+
+	if txEvent == nil {
+		return fmt.Errorf("transaction event is nil")
+	}
+
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+
+	// Serializar la transacción completa
+	jsonData, err := json.Marshal(txEvent)
+	if err != nil {
+		return fmt.Errorf("serialize transaction: %w", err)
+	}
+
+	if _, err := fs.file.Write(jsonData); err != nil {
+		return fmt.Errorf("write to file: %w", err)
+	}
+
+	if _, err := fs.file.Write([]byte("\n")); err != nil {
+		return fmt.Errorf("write newline: %w", err)
+	}
+
+	return nil
+}
+
 func (fs *FileSink) Close() error {
 	return nil
 }

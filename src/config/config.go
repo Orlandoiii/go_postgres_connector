@@ -28,8 +28,10 @@ type FilterConfig struct {
 }
 
 type Target struct {
-	Name   string       `json:"Name"`
-	Filter FilterConfig `json:"Filter,omitempty"`
+	Name              string       `json:"Name"`
+	Filter            FilterConfig `json:"Filter,omitempty"`
+	Group             string       `json:"Group,omitempty"`             // Nuevo: grupo para agrupar targets
+	SendAsTransaction bool         `json:"SendAsTransaction,omitempty"` // Nuevo: enviar transacción completa
 }
 
 type Pipeline struct {
