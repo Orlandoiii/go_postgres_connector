@@ -27,8 +27,31 @@ type ChangeEvent struct {
 	NewData     map[string]interface{} `json:"new_data,omitempty"`
 }
 
-// Modelo que representa una transaccion en la base de datos por ejemplo: begin, commit ademas de las operaciones que se realizaron en la transaccion
-// agrupa las operaciones de una transaccion
+func (ce *ChangeEvent) ToChangeEventSink(xid uint32,
+	lsn pglogrepl.LSN) *ChangeEventSink {
+	return &ChangeEventSink{
+		Xid:         xid,
+		Lsn:         lsn,
+		Operation:   ce.Operation,
+		Schema:      ce.Schema,
+		Table:       ce.Table,
+		ConsumeTime: ce.ConsumeTime,
+		OldData:     ce.OldData,
+		NewData:     ce.NewData,
+	}
+}
+
+type ChangeEventSink struct {
+	Xid         uint32                 `json:"xid,omitempty"`
+	Lsn         pglogrepl.LSN          `json:"lsn,omitempty"`
+	Operation   EventType              `json:"operation"`
+	Schema      string                 `json:"schema"`
+	Table       string                 `json:"table"`
+	ConsumeTime time.Time              `json:"consume_time,omitempty"`
+	OldData     map[string]interface{} `json:"old_data,omitempty"`
+	NewData     map[string]interface{} `json:"new_data,omitempty"`
+}
+
 type TransactionEvent struct {
 	Xid        uint32        `json:"tx_id,omitempty"`
 	Timestamp  time.Time     `json:"timestamp,omitempty"`

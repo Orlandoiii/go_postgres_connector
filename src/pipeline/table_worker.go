@@ -43,7 +43,9 @@ func (tw *TableWorker) processEvent(ctx context.Context, e *workerEvent) error {
 
 	tw.Trace(ctx, "Procesando evento", "worker", tw.tableKey, "lsn", e.txEvent.LSN)
 
-	err := tw.sink.PersistEvent(ctx, e.changeEvent, e.txEvent)
+	sinkEvent := e.changeEvent.ToChangeEventSink(e.txEvent.Xid, e.txEvent.LSN)
+
+	err := tw.sink.PersistEvent(ctx, sinkEvent, e.txEvent)
 
 	if err != nil {
 

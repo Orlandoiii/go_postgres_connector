@@ -93,7 +93,7 @@ type FileSink struct {
 }
 
 func (fs *FileSink) PersistEvent(ctx context.Context,
-	changeEvent *ChangeEvent, txEvent *TransactionEvent) error {
+	changeEvent *ChangeEventSink, txEvent *TransactionEvent) error {
 	if changeEvent == nil || txEvent == nil {
 		return nil
 	}
