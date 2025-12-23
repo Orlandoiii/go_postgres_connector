@@ -1,5 +1,5 @@
 {
-    "Server":{
+    "Server": {
         "HttpPort": 9090
     },
     "Log": {
@@ -19,16 +19,16 @@
         }
     },
     "Postgres": {
-        "ConnectionString": "host=localhost port=6455 dbname=sypago_db sslmode=disable pool_min_conns=4 pool_max_conns=24 application_name=sycom_postgres_connector",
+        "ConnectionString": "host=localhost port=6455 dbname=sygateway sslmode=disable pool_min_conns=4 pool_max_conns=24 application_name=sycom_postgres_connector",
         "User": "user_sypago",
         "Password": "lTf7$12vgeBQnrOyhtctJFdwgVX",
-        "SlotName": "cdc_slot",
+        "SlotName": "cdc_sygateway_slot",
         "WorkerBufferSize": 320,
         "GoFinalLSN": false,
         "Listeners": [
             {
-                "Publication": "pub_transaction",
-                "Table": "sygateway.transaction",
+                "Publication": "pub_outbox_messages",
+                "Table": "public.outbox_messages",
                 "Actions": [
                     "insert",
                     "update"
@@ -36,84 +36,25 @@
                 "Pipeline": {
                     "Targets": [
                         {
-                            "Name": "transactions_insert_update",
-                            "Group": "transactions_grouped",
-                            "SendAsTransaction": true,
-                            "Filter": {
-                                "Actions": [
-                                    "insert",
-                                    "update"
-                                ]
-                            }
-                        },
-                        {
-                            "Name": "transactions_individual",
+                            "Name": "outbox_messages_topic",
                             "Group": "",
                             "SendAsTransaction": false,
                             "Filter": {
                                 "Actions": [
                                     "insert",
                                     "update"
-                                ]
-                            }
-                        }
-                    ]
-                }
-            },
-            {
-                "Publication": "pub_transaction_delivery_trace",
-                "Table": "sygateway.transaction_delivery_trace",
-                "Actions": [
-                    "insert",
-                    "update"
-                ]
-            },
-            {
-                "Publication": "pub_transaction_process_entries",
-                "Table": "sygateway.transaction_process_entries",
-                "Actions": [
-                    "insert",
-                    "update"
-                ],
-                "Pipeline": {
-                    "Targets": [
-                        {
-                            "Name": "transaction_process_entries_filtered",
-                            "Filter": {
-                                "Actions": [
-                                    "update"
                                 ],
                                 "Conditions": [
                                     {
-                                        "Field": "new_data.status",
-                                        "Operator": "!=",
-                                        "Value": null
+                                        "Field": "new_data.should_publish",
+                                        "Operator": "==",
+                                        "Value": true
                                     }
-                                ],
-                                "Logic": "AND"
-                            }
-                        },
-                        {
-                            "Name": "transaction_process_entries_all",
-                            "Group": "transactions_grouped",
-                            "SendAsTransaction": true,
-                            "Filter": {
-                                "Actions": [
-                                    "insert",
-                                    "update"
                                 ]
                             }
                         }
                     ]
                 }
-            },
-            {
-                "Publication": "pub_transaction_reception_trace",
-                "Table": "sygateway.transaction_reception_trace",
-                "Actions": [
-                    "insert",
-                    "update"
-                ]
             }
         ]
     },
