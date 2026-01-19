@@ -55,6 +55,34 @@
                         }
                     ]
                 }
+            },
+            {
+                "Publication": "pub_process_transactions",
+                "Table": "public.transaction_process_entries",
+                "Actions": [
+                    "insert"
+                ],
+                "Pipeline": {
+                    "Targets": [
+                        {
+                            "Name": "transaction_process_entries_topic",
+                            "Group": "",
+                            "SendAsTransaction": false,
+                            "Filter": {
+                                "Actions": [
+                                    "insert"
+                                ],
+                                "Conditions": [
+                                    {
+                                        "Field": "new_data.should_publish",
+                                        "Operator": "==",
+                                        "Value": true
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                }
             }
         ]
     },
