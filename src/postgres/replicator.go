@@ -298,10 +298,40 @@ func (r *Replicator) receiveLoop(ctx context.Context) error {
 
 		default:
 
-			r.logger.Warn(ctx, "Mensaje inesperado",
+			r.logger.Warn(ctx, "Mensaje no copy data/desconocido",
 				nil,
 				"type", fmt.Sprintf("%T", msg),
 				"timestamp", time.Now().Format("2006-01-02 15:04:05"))
+
+			if readyForQuery, ok := msg.(*pgproto3.ReadyForQuery); ok {
+				r.logger.Debug(ctx, "Descartando ReadyForQuery inicial",
+					"tx_status", string(readyForQuery.TxStatus))
+				continue
+			}
+
+			if errorResponse, ok := msg.(*pgproto3.ErrorResponse); ok {
+				// Crear un error más descriptivo con toda la información
+				errMsg := fmt.Sprintf("Error de PostgreSQL durante replicación: %s (código: %s)",
+					errorResponse.Message, errorResponse.Code)
+				if errorResponse.Detail != "" {
+					errMsg += fmt.Sprintf(" - Detalle: %s", errorResponse.Detail)
+				}
+				if errorResponse.Hint != "" {
+					errMsg += fmt.Sprintf(" - Hint: %s", errorResponse.Hint)
+				}
+
+				r.logger.Error(ctx, "Error recibido de PostgreSQL durante replicación",
+					errors.New(errorResponse.Code),
+					"message", errorResponse.Message,
+					"detail", errorResponse.Detail,
+					"hint", errorResponse.Hint,
+					"code", errorResponse.Code)
+
+				return fmt.Errorf("postgres error during replication: %w",
+					errors.New(errMsg))
+			}
+
+			continue
 		}
 
 		if shouldSendStatus || time.Since(r.lastSendTime) > 5*time.Second {
@@ -325,18 +355,9 @@ func (r *Replicator) receiveLoop(ctx context.Context) error {
 
 func (r *Replicator) Start(ctx context.Context) error {
 
-	r.logger.Info(ctx, "Creando slot de replicacion")
-
-	err := CreateLogicalSlotIfMissing(ctx, r.sqlConn, r.slot, PgoutputPlugin)
-
-	if err != nil {
-
-		return fmt.Errorf("create slot: %w", err)
-	}
-
 	r.logger.Info(ctx, "Verificando tablas en las publicaciones")
 
-	err = VerifyTables(ctx, r.sqlConn, r.listeners)
+	err := VerifyTables(ctx, r.sqlConn, r.listeners)
 
 	if err != nil {
 		return fmt.Errorf("verificar tablas: %w", err)
@@ -359,6 +380,15 @@ func (r *Replicator) Start(ctx context.Context) error {
 
 		pubNames = append(pubNames, strings.TrimSpace(listener.Publication))
 
+	}
+
+	r.logger.Info(ctx, "Creando slot de replicacion")
+
+	err = CreateLogicalSlotIfMissing(ctx, r.sqlConn, r.slot, PgoutputPlugin)
+
+	if err != nil {
+
+		return fmt.Errorf("create slot: %w", err)
 	}
 
 	lastLSN, err := GetSlotLSN(ctx, r.sqlConn, r.slot)
