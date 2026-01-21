@@ -44,6 +44,18 @@ func (lc *LSNCoordinator) RegisterTable(workerKey string) {
 	lc.targetLSNs[workerKey] = pglogrepl.LSN(0)
 }
 
+// UnregisterTable elimina una entrada del map de LSNs
+// CRITICAL FIX: Previene memory leaks cuando se eliminan workers/tablas
+func (lc *LSNCoordinator) UnregisterTable(workerKey string) {
+	lc.mu.Lock()
+	defer lc.mu.Unlock()
+
+	if _, ok := lc.targetLSNs[workerKey]; ok {
+		delete(lc.targetLSNs, workerKey)
+		lc.Trace(context.Background(), "LSN unregistered", "worker", workerKey)
+	}
+}
+
 func (lc *LSNCoordinator) ReportLSN(ctx context.Context, workerKey string, lsn pglogrepl.LSN) {
 	lc.mu.Lock()
 	defer lc.mu.Unlock()

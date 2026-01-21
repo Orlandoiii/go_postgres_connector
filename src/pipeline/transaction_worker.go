@@ -18,6 +18,7 @@ type TransactionWorker struct {
 	stopCh         chan struct{}
 	observability.Logger
 	metrics *observability.ConnectorMetrics
+	stopped sync.Once // CRITICAL FIX: Prevenir cierres múltiples de canales
 }
 
 func NewTransactionWorker(groupKey string, lsnCoordinator *LSNCoordinator,
@@ -117,36 +118,48 @@ func (tw *TransactionWorker) Start(ctx context.Context) {
 }
 
 func (tw *TransactionWorker) Stop(ctx context.Context) {
-	// Enviar señal de stop sin bloquear
-	select {
-	case tw.stopCh <- struct{}{}:
-	default:
-		// Si el canal ya está lleno, el worker ya sabe que debe detenerse
-	}
+	// CRITICAL FIX: Usar sync.Once para prevenir cierres múltiples de canales
+	// Esto evita panics si Stop() se llama múltiples veces
+	tw.stopped.Do(func() {
+		// Enviar señal de stop sin bloquear
+		select {
+		case tw.stopCh <- struct{}{}:
+		default:
+			// Si el canal ya está lleno, el worker ya sabe que debe detenerse
+		}
 
-	// Cerrar canales para que el worker sepa que debe terminar
-	close(tw.eventCh)
+		// Cerrar canales para que el worker sepa que debe terminar
+		// sync.Once garantiza que esto solo se ejecute una vez
+		if tw.eventCh != nil {
+			close(tw.eventCh)
+			tw.eventCh = nil // Marcar como cerrado
+		}
 
-	// Esperar a que el worker termine (con timeout)
-	done := make(chan struct{})
-	go func() {
-		tw.wg.Wait()
-		close(done)
-	}()
+		// Esperar a que el worker termine (con timeout)
+		done := make(chan struct{})
+		go func() {
+			tw.wg.Wait()
+			close(done)
+		}()
 
-	select {
-	case <-done:
-		// Worker terminó correctamente
-	case <-ctx.Done():
-		// Timeout o contexto cancelado
-		tw.Warn(ctx, "Timeout waiting for transaction worker to stop", nil, "group", tw.groupKey)
-	case <-time.After(5 * time.Second):
-		// Timeout de seguridad
-		tw.Warn(ctx, "Timeout waiting for transaction worker to stop", nil, "group", tw.groupKey)
-	}
+		select {
+		case <-done:
+			// Worker terminó correctamente
+		case <-ctx.Done():
+			// Timeout o contexto cancelado
+			tw.Warn(ctx, "Timeout waiting for transaction worker to stop", nil, "group", tw.groupKey)
+		case <-time.After(5 * time.Second):
+			// Timeout de seguridad
+			tw.Warn(ctx, "Timeout waiting for transaction worker to stop", nil, "group", tw.groupKey)
+		}
 
-	// Cerrar stopCh al final para evitar panics
-	close(tw.stopCh)
+		// Cerrar stopCh al final para evitar panics
+		// sync.Once garantiza que esto solo se ejecute una vez
+		if tw.stopCh != nil {
+			close(tw.stopCh)
+			tw.stopCh = nil // Marcar como cerrado
+		}
+	})
 }
 
 func (tw *TransactionWorker) Process(ctx context.Context, txEvent *TransactionEvent) error {

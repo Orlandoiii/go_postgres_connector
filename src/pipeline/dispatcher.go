@@ -394,7 +394,11 @@ func (d *Dispatcher) Stop(ctx context.Context) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	for _, worker := range d.workers {
+	// CRITICAL FIX: Limpiar workers después de detenerlos para prevenir memory leaks
+	workersCount := len(d.workers)
+	transactionWorkersCount := len(d.transactionWorkers)
+
+	for workerKey, worker := range d.workers {
 		worker.Stop(ctx)
 
 		if worker.sink != nil {
@@ -405,9 +409,15 @@ func (d *Dispatcher) Stop(ctx context.Context) {
 					"table", worker.tableKey)
 			}
 		}
+
+		// Limpiar entrada del map para liberar memoria
+		delete(d.workers, workerKey)
+
+		// Limpiar LSN del coordinator
+		d.coordinator.UnregisterTable(workerKey)
 	}
 
-	for _, worker := range d.transactionWorkers {
+	for groupKey, worker := range d.transactionWorkers {
 		worker.Stop(ctx)
 
 		if worker.sink != nil {
@@ -418,7 +428,17 @@ func (d *Dispatcher) Stop(ctx context.Context) {
 					"group", worker.groupKey)
 			}
 		}
+
+		// Limpiar entrada del map para liberar memoria
+		delete(d.transactionWorkers, groupKey)
+
+		// Limpiar LSN del coordinator
+		d.coordinator.UnregisterTable(groupKey)
 	}
+
+	d.logger.Info(ctx, "Dispatcher stopped and cleaned up",
+		"workers_cleaned", workersCount,
+		"transaction_workers_cleaned", transactionWorkersCount)
 }
 
 func (d *Dispatcher) GetTotalPendingEvents() int {

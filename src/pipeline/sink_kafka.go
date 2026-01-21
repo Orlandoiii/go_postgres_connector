@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/SOLUCIONESSYCOM/go_postgres_connector/src/config"
 	"github.com/SOLUCIONESSYCOM/go_postgres_connector/src/kafka"
@@ -23,14 +24,16 @@ type KafkaSinkFactory struct {
 }
 
 type deliveryMonitor struct {
-	producer  *kafka.ProducerService
-	topic     string
-	logger    observability.Logger
-	mu        sync.RWMutex
-	pendingTx map[uint32]*pendingTransaction
-	ctx       context.Context
-	cancel    context.CancelFunc
-	wg        sync.WaitGroup
+	producer          *kafka.ProducerService
+	topic             string
+	logger            observability.Logger
+	mu                sync.RWMutex
+	pendingTx         map[uint32]*pendingTransaction
+	ctx               context.Context
+	cancel            context.CancelFunc
+	wg                sync.WaitGroup
+	cleanupInterval   time.Duration // Intervalo para limpiar transacciones huérfanas
+	txTimeout         time.Duration // Timeout para transacciones pendientes
 }
 
 // pendingTransaction rastrea el estado de una transacción pendiente
@@ -42,6 +45,7 @@ type pendingTransaction struct {
 	lsn         pglogrepl.LSN
 	tableKey    string
 	coordinator *LSNCoordinator
+	createdAt   time.Time // Timestamp para limpieza de transacciones huérfanas
 }
 
 type messageMetadata struct {
@@ -91,14 +95,18 @@ func (ksf *KafkaSinkFactory) CreateSink(tableKey string) (EventSink, error) {
 		producer = prod
 		ksf.producers[topic] = producer
 
+		// CRITICAL FIX: Usar contexto cancelable que se puede cancelar explícitamente
+		// El cancel se llama en stop(), pero también se asegura en Close()
 		ctx, cancel := context.WithCancel(context.Background())
 		mon := &deliveryMonitor{
-			producer:  producer,
-			topic:     topic,
-			logger:    ksf.logger,
-			pendingTx: make(map[uint32]*pendingTransaction),
-			ctx:       ctx,
-			cancel:    cancel,
+			producer:        producer,
+			topic:           topic,
+			logger:          ksf.logger,
+			pendingTx:       make(map[uint32]*pendingTransaction),
+			ctx:             ctx,
+			cancel:          cancel,
+			cleanupInterval: 30 * time.Second, // Limpiar transacciones huérfanas cada 30s
+			txTimeout:       5 * time.Minute,  // Timeout para transacciones pendientes
 		}
 
 		mon.start()
@@ -160,11 +168,18 @@ func (dm *deliveryMonitor) start() {
 func (dm *deliveryMonitor) run() {
 	defer dm.wg.Done()
 
+	// Ticker para limpiar transacciones huérfanas periódicamente
+	cleanupTicker := time.NewTicker(dm.cleanupInterval)
+	defer cleanupTicker.Stop()
+
 	for {
 		select {
 		case <-dm.ctx.Done():
 			dm.logger.Trace(dm.ctx, "DeliveryMonitor stopped by context")
 			return
+		case <-cleanupTicker.C:
+			// Limpiar transacciones huérfanas con timeout
+			dm.cleanupStaleTransactions()
 		case e := <-dm.producer.DeliveryReports:
 			if e == nil {
 				continue
@@ -222,8 +237,57 @@ func (dm *deliveryMonitor) run() {
 }
 
 func (dm *deliveryMonitor) stop() {
-	dm.cancel()
+	// CRITICAL FIX: Asegurar que el contexto se cancele siempre
+	// Esto previene que la goroutine quede bloqueada
+	if dm.cancel != nil {
+		dm.cancel()
+	}
 	dm.wg.Wait()
+	
+	// Limpiar transacciones pendientes al detener
+	dm.mu.Lock()
+	dm.pendingTx = make(map[uint32]*pendingTransaction)
+	dm.mu.Unlock()
+}
+
+// cleanupStaleTransactions limpia transacciones que han excedido el timeout
+// Previene memory leaks de transacciones que nunca se confirman
+func (dm *deliveryMonitor) cleanupStaleTransactions() {
+	dm.mu.Lock()
+	defer dm.mu.Unlock()
+
+	now := time.Now()
+	staleCount := 0
+	
+	for xid, tx := range dm.pendingTx {
+		if now.Sub(tx.createdAt) > dm.txTimeout {
+			dm.logger.Warn(dm.ctx, "Limpiando transacción huérfana (timeout)",
+				nil,
+				"topic", dm.topic,
+				"xid", xid,
+				"age", now.Sub(tx.createdAt).String(),
+				"pending", tx.pending,
+				"confirmed", tx.confirmed)
+			
+			// Reportar LSN antes de eliminar para no perder progreso
+			if tx.coordinator != nil && tx.lsn > 0 && tx.tableKey != "" {
+				// Reportar fuera del lock
+				go func(coord *LSNCoordinator, key string, lsn pglogrepl.LSN) {
+					coord.ReportLSN(dm.ctx, key, lsn)
+				}(tx.coordinator, tx.tableKey, tx.lsn)
+			}
+			
+			delete(dm.pendingTx, xid)
+			staleCount++
+		}
+	}
+	
+	if staleCount > 0 {
+		dm.logger.Info(dm.ctx, "Transacciones huérfanas limpiadas",
+			nil,
+			"topic", dm.topic,
+			"count", staleCount)
+	}
 }
 
 func (dm *deliveryMonitor) registerTransaction(xid uint32,
@@ -242,6 +306,7 @@ func (dm *deliveryMonitor) registerTransaction(xid uint32,
 		lsn:         lsn,
 		tableKey:    tableKey,
 		coordinator: coordinator,
+		createdAt:   time.Now(), // Timestamp para limpieza de huérfanas
 	}
 }
 
